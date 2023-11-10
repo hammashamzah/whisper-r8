@@ -1,20 +1,11 @@
 # Prediction interface for Cog ⚙️
-from typing import Any, List
 import base64
-import contextlib
 import datetime
-import json
-import magic
-import mimetypes
-import numpy as np
 import subprocess
-import io
 import os
-import pandas as pd
 import requests
 import time
 import torch
-import wave
 import re
 
 from cog import BasePredictor, BaseModel, Input, File, Path
@@ -79,10 +70,8 @@ class Predictor(BasePredictor):
                 ])
 
             elif file_url is not None:
-                response = requests.get(file_url)
                 temp_audio_filename = f"temp-{time.time_ns()}.audio"
-                with open(temp_audio_filename, 'wb') as file:
-                    file.write(response.content)
+                self.file_downloader(file_url, temp_audio_filename)
 
                 subprocess.run([
                     'ffmpeg', '-i', temp_audio_filename, '-ar', '16000', '-ac',
@@ -126,10 +115,29 @@ class Predictor(BasePredictor):
     def convert_time(self, secs, offset_seconds=0):
         return datetime.timedelta(seconds=(round(secs) + offset_seconds))
 
+    def file_downloader(self, file_url, temp_audio_filename):
+        # Check the URL. If it is a youtube video, download it using yt-dlp and convert it to audio
+        if "youtube.com" in file_url or "youtu.be" in file_url:
+            subprocess.run([
+                "yt-dlp", "-x", "--audio-format", "best",
+                "--audio-quality", "0", "-o", temp_audio_filename, file_url
+            ])
+            subprocess.run(["ls", "-l"])
+            subprocess.run(
+                f"mv {temp_audio_filename}.* {temp_audio_filename}",
+                shell=True
+            )
+
+        else:
+            response = requests.get(file_url)
+            with open(temp_audio_filename, 'wb') as file:
+                file.write(response.content)
+
     def speech_to_text(self,
                        audio_file_wav,
                        num_speakers=2,
-                       prompt="People takling.",
+                       # TODO: fix the default prompt
+                       prompt="People talking.",
                        offset_seconds=0,
                        group_segments=True):
         time_start = time.time()
@@ -195,7 +203,7 @@ class Predictor(BasePredictor):
                     if turn.start <= word_end and turn.end >= word_start:
                         # Add word without modifications
                         segment_text.append(word['word'])
-                        
+
                         # Strip here for individual word storage
                         word['word'] = word['word'].strip()
                         segment_words.append(word)
